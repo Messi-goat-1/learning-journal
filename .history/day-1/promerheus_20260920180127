@@ -1,0 +1,66 @@
+kubectl exec -n deepflow deepflow-clickhouse-0 -- clickhouse-client -q "show tables from prometheus"
+samples
+samples_local
+===
+kubectl exec -n deepflow deepflow-clickhouse-0 -- clickhouse-client -q "select name, engine from system.tables where database='prometheus'"
+samples	Distributed
+samples_local	MergeTree
+
+=====جدول أعمدة prometheus.samples (كل الأعمدة الـ 34)
+
+المخرجات وصلت كاملة (آخر عمود agent_id). هذا الجدول يجمع فكرتين رأيناهما سابقاً: أعمدة الموارد (مثل ext_metrics.metrics) + أعمدة خاصة بـ Prometheus. التعليقات الصينية مترجمة.
+
+1) الوقت والقيمة
+#	اسم العمود	النوع	الشرح الأصلي	التوضيح بالعربي
+1	time	DateTime	v7.1.7.3	وقت العينة بالثواني (والرقم إصدار البنية)
+2	value	Float64	-	قيمة المقياس نفسها (الرقم)
+2) هوية المقياس (خاصة بـ Prometheus)
+#	اسم العمود	النوع	الشرح الأصلي	التوضيح بالعربي
+3	metric_id	UInt32	encoded ID of the metric name	معرّف مشفّر لاسم المقياس (مثل node_cpu_seconds_total)
+4	target_id	UInt32	the encoded ID of the target	معرّف مشفّر للهدف (Target) الذي جُمع منه المقياس
+5	team_id	UInt16	the team ID	معرّف الفريق
+6-13	app_label_value_id_1 ... app_label_value_id_8	UInt32	-	معرّفات مشفّرة لقيم الوسوم (Labels)، حتى 8 وسوم
+
+الفكرة: بدل تخزين اسم المقياس والوسوم كنصوص (تستهلك مساحة)، يخزّنها DeepFlow كأرقام، وتُترجم إلى نصوص عبر جداول في قاعدة flow_tag. هذا استنتاج من الأسماء وما أعرفه عن DeepFlow، وسنتأكد منه عند فحص flow_tag.
+
+3) عنوان IP
+#	اسم العمود	النوع	الشرح الأصلي	التوضيح بالعربي
+14	ip4	IPv4	IPv4地址	عنوان IPv4 لمصدر المقياس
+15	ip6	IPv6	IPV6地址	عنوان IPv6 لمصدر المقياس
+16	is_ipv4	UInt8	是否IPV4地址. 0: ip6 صالح, 1: ip4 صالح	هل العنوان IPv4 (1) أم IPv6 (0)
+4) موارد البنية التحتية
+#	اسم العمود	النوع	التوضيح بالعربي
+17	region_id	UInt16	معرّف المنطقة
+18	az_id	UInt16	معرّف منطقة التوافر
+19	host_id	UInt16	معرّف الخادم المضيف
+20	l3_epc_id	Int32	معرّف الشبكة الافتراضية (VPC)
+21	l3_device_type	UInt8	نوع المورد المقابل للـ IP
+22	l3_device_id	UInt32	معرّف المورد المقابل للـ IP
+23	subnet_id	UInt16	معرّف الشبكة الفرعية (0 = غير موجود)
+24	gprocess_id	UInt32	معرّف العملية العام
+25	agent_id	UInt16	معرّف وكيل DeepFlow (Agent)
+5) موارد Kubernetes
+#	اسم العمود	النوع	التوضيح بالعربي
+26	pod_cluster_id	UInt16	معرّف الـ Cluster
+27	pod_node_id	UInt32	معرّف عقدة Kubernetes
+28	pod_ns_id	UInt16	معرّف الـ Namespace
+29	pod_group_id	UInt32	معرّف الـ Workload (مثل Deployment)
+30	pod_id	UInt32	معرّف الـ Pod
+31	service_id	UInt32	معرّف الخدمة (Service)
+6) الحقول التلقائية (Auto)
+#	اسم العمود	النوع	الشرح الأصلي (مترجم)	التوضيح بالعربي
+32	auto_instance_id	UInt32	الأولوية: pod_id ← pod_node_id ← l3_device_id	معرّف المثيل، يختار DeepFlow أول قيمة موجودة بهذا الترتيب
+33	auto_instance_type	UInt8	0 = IP بلا مورد، 0-100 = deviceType (10 = pod، 14 = podNode)، 101-200 = موارد مجرّدة (101 = podGroup، 102 = service)، 201-255 = أخرى	نوع المثيل
+34	auto_service_id	UInt32	الأولوية: service_id ← pod_node_id ← l3_device_id	معرّف الخدمة، ترتيب الأولوية مختلف
+35	auto_service_type	UInt8	نفس رموز النوع السابقة	نوع الخدمة
+
+ملاحظة: بعد العدّ الدقيق، المخرجات فيها 35 عموداً وليس 34 كما كتبت في العنوان (أخطأت في العدّ).
+
+الفرق بينه وبين ext_metrics.metrics
+	ext_metrics.metrics	prometheus.samples
+اسم المقياس	نص في مصفوفة (metrics_float_names)	رقم مشفّر (metric_id)
+الوسوم	نصوص في مصفوفات	أرقام مشفّرة (app_label_value_id_1..8)
+القيمة	مصفوفة metrics_float_values	عمود واحد value
+أعمدة الموارد	موجودة	موجودة (نفسها تقريباً)
+
+يعني prometheus.samples مضغوط أكثر لكنه أصعب في القراءة المباشرة، لأنك تحتاج ترجمة المعرّفات عبر flow_tag.

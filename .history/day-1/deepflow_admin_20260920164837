@@ -1,0 +1,24 @@
+kubectl exec -n deepflow deepflow-clickhouse-0 -- clickhouse-client -q "show tables from deepflow_admin"
+Defaulted container "clickhouse" out of: clickhouse, clickhouse-init (init)
+deepflow_server
+deepflow_server_local
+===
+kubectl exec -n deepflow deepflow-clickhouse-0 -- clickhouse-client -q "select name, engine from system.tables where database='deepflow_admin'"
+Defaulted container "clickhouse" out of: clickhouse, clickhouse-init (init)
+deepflow_server	Distributed
+deepflow_server_local	MergeTree
+=======
+kubectl exec -n deepflow deepflow-clickhouse-0 -- clickhouse-client -q "describe deepflow_admin.deepflow_server"
+جدول أعمدة deepflow_admin.deepflow_server
+
+التعليقات في هذا الجدول مكتوبة بالصينية، فترجمتها لك في العمود الثاني:
+
+اسم العمود	النوع	الشرح (من DeepFlow)	التوضيح بالعربي
+time	DateTime	v7.1.7.3	وقت تسجيل البيانات بالثواني (والرقم إصدار البنية)
+virtual_table_name	String	虚拟表名 = "اسم الجدول الافتراضي"	اسم الفئة أو الجدول الافتراضي الذي تنتمي إليه المقاييس (مثلاً وحدة معينة داخل الـ Server)
+team_id	UInt16	团队ID = "معرّف الفريق"	معرّف الفريق (Team)
+tag_names	Array(String)	额外的tag = "وسوم إضافية"	أسماء الوسوم الإضافية
+tag_values	Array(String)	额外的tag对应的值 = "قيم الوسوم الإضافية"	قيم الوسوم، تقابل الأسماء بالترتيب
+metrics_float_names	Array(String)	额外的float类型metrics = "مقاييس إضافية من نوع float"	أسماء المقاييس الرقمية
+metrics_float_values	Array(Float64)	(بدون شرح)	قيم المقاييس، تقابل الأسماء بالترتيب
+ملاحظات

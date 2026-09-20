@@ -1,0 +1,241 @@
+kubectl exec -n deepflow deepflow-clickhouse-0 -- clickhouse-client -q "show tables from event"
+alert_event
+alert_event_local
+alert_record
+alert_record_local
+event
+event_local
+event_metrics.1s
+event_metrics.1s_agg
+event_metrics.1s_local
+event_metrics.1s_mv
+file_event
+file_event_local
+file_event_metrics.1s
+file_event_metrics.1s_agg
+file_event_metrics.1s_local
+file_event_metrics.1s_mv
+==
+kubectl exec -n deepflow deepflow-clickhouse-0 -- clickhouse-client -q "select name, engine from system.tables where database='event'"
+
+alert_event	Distributed
+alert_event_local	ReplacingMergeTree
+alert_record	Distributed
+alert_record_local	MergeTree
+event	Distributed
+event_local	MergeTree
+event_metrics.1s	Distributed
+event_metrics.1s_agg	AggregatingMergeTree
+event_metrics.1s_local	View
+event_metrics.1s_mv	MaterializedView
+file_event	Distributed
+file_event_local	MergeTree
+file_event_metrics.1s	Distributed
+file_event_metrics.1s_agg	AggregatingMergeTree
+file_event_metrics.1s_local	View
+file_event_metrics.1s_mv	MaterializedView
+لمجموعة	الجدول الذي تستعلم منه	الجداول الداخلية	ماذا تخزّن؟
+التنبيهات (أحداث)	alert_event	alert_event_local	أحداث التنبيه (تغيّر حالة التنبيه)
+التنبيهات (سجلات)	alert_record	alert_record_local	سجلات التنبيهات (السجل الكامل لكل تنبيه)
+أحداث الموارد	event	event_local	أحداث البنية مثل إنشاء/حذف/إعادة تشغيل Pod
+أحداث الملفات	file_event	file_event_local	عمليات الملفات (قراءة/كتابة) التي يلتقطها الـ Agent
+
+يعني عملياً عندك 4 جداول رئيسية تستعلم منها: alert_event، alert_record، event، file_event.
+
+الأنواع الجديدة في عمود engine
+النوع	المعنى
+ReplacingMergeTree	مثل MergeTree لكنه يستبدل الصفوف المكررة (بنفس المفتاح) بأحدثها. مناسب لـ alert_event لأن حالة التنبيه تتحدّث
+AggregatingMergeTree	يخزّن نتائج مجمّعة مسبقاً (مثل مجموع أو متوسط لكل ثانية)
+View	استعلام محفوظ، لا يخزّن بيانات بنفسه
+MaterializedView	يعمل تلقائياً: كلما دخلت بيانات جديدة، يحسب التجميع ويكتبه في جدول آخ
+\
+جداول المقاييس (event_metrics وfile_event_metrics)
+
+لاحظ أن أسماءها فيها نقطة: event_metrics.1s. هذه في الحقيقة قاعدة بيانات واحدة اسمها event_metrics... لا، انتبه: الأمر الذي نفّذته يعرض جداول قاعدة event فقط، فالنقطة هنا جزء من اسم الجدول (اسمه event_metrics.1s). وكل واحدة تعمل بهذه السلسلة:
+
+event_local / file_event_local  (البيانات الخام)
+        │
+        ▼  (MaterializedView: يعمل تلقائياً عند كل إدخال)
+event_metrics.1s_mv
+        │
+        ▼  (يكتب في)
+event_metrics.1s_agg  (AggregatingMergeTree: مقاييس مجمّعة لكل ثانية)
+        │
+        ▼  (View: يقرأ ويفك التجميع)
+event_metrics.1s_local
+        │
+        ▼
+event_metrics.1s  (Distributed: الذي تستعلم منه)
+
+ونفس السلسلة لـ file_event_metrics.1s.
+
+الجدول	الدور
+event_metrics.1s / file_event_metrics.1s	تستعلم منه: مقاييس مجمّعة كل ثانية (مثل عدد الأحداث)
+..._agg	التخزين الفعلي للتجميع
+..._local (View)	طبقة وسيطة
+..._mv	آلية التجميع التلقائي
+======
+# 1) alert_event
+kubectl exec -n deepflow deepflow-clickhouse-0 -- clickhouse-client -q "describe event.alert_event"
+جدول أعمدة event.alert_event
+
+هذا الجدول بدون تعليقات من DeepFlow (عدا time)، فالشرح التالي مبني على أسماء الأعمدة وما أعرفه عن DeepFlow، وليس على نص رسمي.
+
+اسم العمود	النوع	التوضيح بالعربي
+time	DateTime	وقت الحدث بالثواني (والرقم إصدار البنية)
+_id	UInt64	معرّف فريد للسجل
+policy_id	UInt32	معرّف سياسة التنبيه (Policy) التي أطلقت الحدث
+policy_type	UInt8	نوع السياسة (رقمي)
+alert_policy	String	اسم سياسة التنبيه
+metric_value	Float64	قيمة المقياس وقت التنبيه (رقم)
+metric_value_str	String	قيمة المقياس كنص
+event_level	UInt8	مستوى خطورة الحدث (رقمي)
+target_tags	String	وسوم الهدف الذي حدث عليه التنبيه (مثل Pod أو خدمة)
+tag_string_names	Array(String)	أسماء الوسوم النصية
+tag_string_values	Array(String)	قيم الوسوم النصية (تقابل الأسماء بالترتيب)
+tag_int_names	Array(String)	أسماء الوسوم الرقمية
+tag_int_values	Array(Int64)	قيم الوسوم الرقمية (تقابل الأسماء بالترتيب)
+trigger_threshold	String	حد التفعيل (العتبة) التي تجاوزها المقياس
+metric_unit	String	وحدة المقياس (مثل ms أو %)
+custom_tag_names	Array(String)	أسماء وسوم مخصصة
+custom_tag_values	Array(String)	قيم الوسوم المخصصة
+_target_uid	String	معرّف فريد للهدف
+_query_region	String	المنطقة التي نُفّذ فيها استعلام التنبيه
+team_id	UInt16	معرّف الفريق
+user_id	UInt32	معرّف المستخدم
+event_id	String	معرّف الحدث (يربط الأحداث المتعلقة بنفس التنبيه)
+start_time	DateTime	وقت بداية التنبيه
+end_time	DateTime	وقت نهاية التنبيه
+duration	UInt32	مدة التنبيه (بالثواني على الأرجح)
+state	UInt32	حالة التنبيه (رقمي، مثل مفعّل أو تم حله)
+alert_time	UInt64	وقت التنبيه (رقم كبير، غالباً طابع زمني)
+# 2) alert_record
+جدول أعمدة event.alert_record
+
+هذا الجدول يشبه alert_event تقريباً، لكنه أقصر: فيه أول 21 عموداً فقط، ولا يحتوي الأعمدة الستة الأخيرة (start_time, end_time, duration, state, alert_time).
+
+اسم العمود	النوع	التوضيح بالعربي
+time	DateTime	وقت السجل بالثواني (والرقم إصدار البنية)
+_id	UInt64	معرّف فريد للسجل
+policy_id	UInt32	معرّف سياسة التنبيه
+policy_type	UInt8	نوع السياسة (رقمي)
+alert_policy	String	اسم سياسة التنبيه
+metric_value	Float64	قيمة المقياس وقت التنبيه
+metric_value_str	String	قيمة المقياس كنص
+event_level	UInt8	مستوى خطورة الحدث (رقمي)
+target_tags	String	وسوم الهدف الذي حدث عليه التنبيه
+tag_string_names	Array(String)	أسماء الوسوم النصية
+tag_string_values	Array(String)	قيم الوسوم النصية (تقابل الأسماء بالترتيب)
+tag_int_names	Array(String)	أسماء الوسوم الرقمية
+tag_int_values	Array(Int64)	قيم الوسوم الرقمية (تقابل الأسماء بالترتيب)
+trigger_threshold	String	حد التفعيل (العتبة)
+metric_unit	String	وحدة المقياس
+custom_tag_names	Array(String)	أسماء وسوم مخصصة
+custom_tag_values	Array(String)	قيم الوسوم المخصصة
+_target_uid	String	معرّف فريد للهدف
+_query_region	String	المنطقة التي نُفّذ فيها الاستعلام
+team_id	UInt16	معرّف الفريق
+user_id	UInt32	معرّف المستخدم
+event_id	String	معرّف الحدث (يربط السجلات بنفس التنبيه)
+# 3) event
+جدول أعمدة event.event
+
+التعليقات هنا بالصينية، فترجمتها لك في العمود الثالث.
+
+اسم العمود	النوع	الشرح (من DeepFlow)	التوضيح بالعربي
+time	DateTime	v7.1.7.3	وقت الحدث بالثواني (والرقم إصدار البنية)
+_id	UInt64	(بدون شرح)	معرّف فريد للسجل
+start_time	DateTime64(6)	精度: 微秒 = "الدقة: ميكروثانية"	وقت بداية الحدث بدقة الميكروثانية
+end_time	DateTime64(6)	精度: 微秒	وقت نهاية الحدث بدقة الميكروثانية
+tagged	UInt8	标签是否为填充, 用于调试 = "هل الوسوم مملوءة، للتصحيح"	حقل للتصحيح: هل أُضيفت الوسوم للحدث
+signal_source	UInt8	事件来源 = "مصدر الحدث"	من أين جاء الحدث (رقمي)
+event_type	String	事件类型 = "نوع الحدث"	نوع الحدث
+event_desc	String	事件信息 = "معلومات الحدث"	وصف الحدث (أهم عمود للقراءة)
+process_kname	String	系统进程 = "عملية النظام"	اسم العملية في النظام المرتبطة بالحدث
+gprocess_id	UInt32	全局进程ID = "معرّف العملية العام"	معرّف العملية العام
+region_id	UInt16	云平台区域ID = "معرّف منطقة المنصة السحابية"	معرّف المنطقة
+az_id	UInt16	可用区ID = "معرّف منطقة التوافر"	معرّف منطقة التوافر
+l3_epc_id	Int32	ip对应的EPC ID = "معرّف EPC المقابل للـ IP"	معرّف الشبكة الافتراضية (VPC)
+host_id	UInt16	宿主机ID = "معرّف الخادم المضيف"	معرّف الخادم المضيف
+pod_id	UInt32	容器ID = "معرّف الحاوية"	معرّف الـ Pod
+pod_node_id	UInt32	容器节点ID = "معرّف عقدة الحاويات"	معرّف عقدة Kubernetes
+pod_ns_id	UInt16	容器命名空间ID = "معرّف الـ Namespace"	معرّف الـ Namespace
+pod_cluster_id	UInt16	容器集群ID = "معرّف عنقود الحاويات"	معرّف الـ Cluster
+pod_group_id	UInt32	容器组ID = "معرّف مجموعة الحاويات"	معرّف الـ Workload (مثل Deployment)
+l3_device_type	UInt8	资源类型 = "نوع المورد"	نوع المورد
+l3_device_id	UInt32	资源ID = "معرّف المورد"	معرّف المورد
+service_id	UInt32	服务ID = "معرّف الخدمة"	معرّف الخدمة
+agent_id	UInt16	采集器ID = "معرّف المجمِّع"	معرّف وكيل DeepFlow (Agent)
+subnet_id	UInt16	(بدون شرح)	معرّف الشبكة الفرعية
+is_ipv4	UInt8	(بدون شرح)	هل العنوان IPv4 (1) أم IPv6 (0)
+ip4	IPv4	(بدون شرح)	عنوان IPv4
+ip6	IPv6	(بدون شرح)	عنوان IPv6
+team_id	UInt16	Team ID	معرّف الفريق
+auto_instance_id	UInt32	(بدون شرح)	معرّف المثيل (يفضّل الـ Pod تلقائياً)
+auto_instance_type	UInt8	(بدون شرح)	نوع المثيل
+auto_service_id	UInt32	(بدون شرح)	معرّف الخدمة (يفضّل Service تلقائياً)
+auto_service_type	UInt8	(بدون شرح)	نوع الخدمة
+app_instance	String	app instance	اسم مثيل التطبيق
+attribute_names	Array(String)	额外的属性 = "خصائص إضافية"	أسماء الخصائص الإضافية
+attribute_values	Array(String)	额外的属性对应的值 = "قيم الخصائص الإضافية"	قيم الخصائص (تقابل الأسماء بالترتيب)
+# 4) file_event
+الجدول بأربعة أعمدة: الاسم، النوع، الشرح الأصلي (مترجم من الصينية)، والتوضيح بالعربي. الأعمدة الخالية من تعليق رسمي شرحتها من أسمائها وما أعرفه عن DeepFlow.
+
+1) الوقت
+#	اسم العمود	النوع	الشرح الأصلي	التوضيح بالعربي
+1	time	DateTime	v7.1.7.3	وقت الحدث بالثواني (والرقم إصدار البنية)
+2	_id	UInt64	-	معرّف فريد للسجل
+3	start_time	DateTime64(6)	精度: 微秒 = الدقة ميكروثانية	وقت بداية العملية
+4	end_time	DateTime64(6)	精度: 微秒	وقت نهاية العملية
+2) معلومات الحدث
+#	اسم العمود	النوع	الشرح الأصلي	التوضيح بالعربي
+5	tagged	UInt8	标签是否为填充, 用于调试 = هل الوسوم مملوءة (للتصحيح)	حقل تصحيح: هل أُضيفت الوسوم للحدث
+6	signal_source	UInt8	事件来源 = مصدر الحدث	مصدر الحدث (رقمي)
+7	event_type	String	事件类型 = نوع الحدث	نوع الحدث (مثل قراءة أو كتابة)
+8	event_desc	String	事件信息 = معلومات الحدث	وصف الحدث
+9	process_kname	String	系统进程 = عملية النظام	اسم العملية التي نفّذت العملية
+10	gprocess_id	UInt32	全局进程ID = معرّف العملية العام	معرّف العملية العام
+3) موارد البنية التحتية (معرّفات رقمية)
+#	اسم العمود	النوع	الشرح الأصلي	التوضيح بالعربي
+11	region_id	UInt16	云平台区域ID = معرّف منطقة المنصة	معرّف المنطقة
+12	az_id	UInt16	可用区ID = معرّف منطقة التوافر	معرّف منطقة التوافر
+13	l3_epc_id	Int32	ip对应的EPC ID = معرّف EPC المقابل للـ IP	معرّف الشبكة الافتراضية (VPC)
+14	host_id	UInt16	宿主机ID = معرّف الخادم المضيف	معرّف الخادم المضيف
+15	pod_id	UInt32	容器ID = معرّف الحاوية	معرّف الـ Pod
+16	pod_node_id	UInt32	容器节点ID = معرّف عقدة الحاويات	معرّف عقدة Kubernetes
+17	pod_ns_id	UInt16	容器命名空间ID = معرّف الـ Namespace	معرّف الـ Namespace
+18	pod_cluster_id	UInt16	容器集群ID = معرّف عنقود الحاويات	معرّف الـ Cluster
+19	pod_group_id	UInt32	容器组ID = معرّف مجموعة الحاويات	معرّف الـ Workload (مثل Deployment)
+20	l3_device_type	UInt8	资源类型 = نوع المورد	نوع المورد
+21	l3_device_id	UInt32	资源ID = معرّف المورد	معرّف المورد
+22	service_id	UInt32	服务ID = معرّف الخدمة	معرّف الخدمة
+23	agent_id	UInt16	采集器ID = معرّف المجمِّع	معرّف وكيل DeepFlow (Agent)
+4) الشبكة والهوية
+#	اسم العمود	النوع	الشرح الأصلي	التوضيح بالعربي
+24	subnet_id	UInt16	-	معرّف الشبكة الفرعية
+25	is_ipv4	UInt8	-	هل العنوان IPv4 (1) أم IPv6 (0)
+26	ip4	IPv4	-	عنوان IPv4
+27	ip6	IPv6	-	عنوان IPv6
+28	team_id	UInt16	Team ID	معرّف الفريق
+29	auto_instance_id	UInt32	-	معرّف المثيل (يفضّل الـ Pod تلقائياً)
+30	auto_instance_type	UInt8	-	نوع المثيل
+31	auto_service_id	UInt32	-	معرّف الخدمة (يفضّل Service تلقائياً)
+32	auto_service_type	UInt8	-	نوع الخدمة
+33	app_instance	String	app instance	اسم مثيل التطبيق
+5) الخصائص الإضافية (Key-Value)
+#	اسم العمود	النوع	الشرح الأصلي	التوضيح بالعربي
+34	attribute_names	Array(String)	额外的属性 = خصائص إضافية	أسماء الخصائص الإضافية
+35	attribute_values	Array(String)	额外的属性对应的值 = قيم الخصائص الإضافية	قيم الخصائص (تقابل الأسماء بالترتيب)
+6) أعمدة الملفات (خاصة بهذا الجدول)
+#	اسم العمود	النوع	الشرح الأصلي	التوضيح بالعربي
+36	bytes	UInt32	-	عدد البايتات المقروءة أو المكتوبة
+37	duration	UInt64	精度: 微秒 = الدقة ميكروثانية	مدة العملية بالميكروثانية
+38	file_name	String	文件名 = اسم الملف	اسم الملف
+39	file_type	UInt8	文件类型 = نوع الملف	نوع الملف (رقمي)
+40	offset	UInt64	读写偏移 = إزاحة القراءة/الكتابة	موضع القراءة/الكتابة داخل الملف
+41	syscall_thread	UInt32	-	معرّف الـ Thread الذي نفّذ الـ syscall
+42	syscall_coroutine	UInt32	-	معرّف الـ Coroutine (مثل Go)
+43	mount_source	String	-	مصدر نقطة التركيب (الجهاز/نظام الملفات)
+44	mount_point	String	-	نقطة التركيب (Mount Point)
+45	file_dir	String	-	المجلد الذي يوجد فيه الملف
+

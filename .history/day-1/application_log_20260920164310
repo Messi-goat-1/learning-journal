@@ -1,0 +1,52 @@
+ت kubectl exec -n deepflow deepflow-clickhouse-0 -- clickhouse-client -q "show tables from application_log"
+طلع لي 
+log
+log_local
+ سويت امر عشان تاكد kubectl exec -n deepflow deepflow-clickhouse-0 -- clickhouse-client -q "select name, engine from system.tables where database='application_log'"
+ log	Distributed
+log_local	MergeTree
+سويت عشان اعرف اعمدة kubectl exec -n deepflow deepflow-clickhouse-0 -- clickhouse-client -q "describe application_log.log"
+اسم العمود	النوع	الشرح (من DeepFlow)	التوضيح بالعربي
+time	DateTime	v7.1.7.3	وقت السجل بالثواني (والرقم هو إصدار البنية)
+timestamp	DateTime64(6)	precision: us	وقت السجل بدقة الميكروثانية
+_id	UInt64	Unique ID	معرّف فريد للسجل
+_type	Enum8	log type	نوع السجل: user=1، system=2، audit=3، agent=4
+trace_id	String	Trace ID	معرّف التتبع لربط السجل بطلب معيّن
+span_id	String	Span ID	معرّف الـ span داخل التتبع
+trace_flags	UInt32	W3C trace flag	أعلام التتبع (غير مدعومة حالياً)
+severity_number	UInt8	log level id	مستوى الخطورة رقمياً
+body	String	log content	نص السجل نفسه
+app_service	LowCardinality(String)	Application Service	اسم الخدمة المنتجة للسجل
+gprocess_id	UInt32	Global Process ID	معرّف العملية العام
+agent_id	UInt16	Agent ID	معرّف وكيل DeepFlow
+region_id	UInt16	Region ID	معرّف المنطقة
+az_id	UInt16	Availability Zone ID	معرّف منطقة التوافر
+l3_epc_id	Int32	VPC ID	معرّف الشبكة الافتراضية (VPC)
+host_id	UInt16	Hypervisor ID	معرّف الخادم المضيف (Hypervisor)
+pod_id	UInt32	K8s POD ID	معرّف الـ Pod
+pod_node_id	UInt32	K8s Node ID	معرّف عقدة Kubernetes
+pod_ns_id	UInt16	K8s Namespace ID	معرّف الـ Namespace
+pod_cluster_id	UInt16	K8s Cluster ID	معرّف الـ Cluster
+pod_group_id	UInt32	K8s Workload ID	معرّف الـ Workload (مثل Deployment)
+l3_device_type	UInt8	Resource Type	نوع المورد
+l3_device_id	UInt32	Resource ID	معرّف المورد
+service_id	UInt32	Service ID	معرّف الخدمة
+subnet_id	UInt16	Subnet ID	معرّف الشبكة الفرعية
+is_ipv4	UInt8	(بدون شرح)	هل العنوان IPv4 (1) أم IPv6 (0)
+ip4	IPv4	(بدون شرح)	عنوان IPv4
+ip6	IPv6	(بدون شرح)	عنوان IPv6
+team_id	UInt16	Team ID	معرّف الفريق
+user_id	UInt32	User ID	معرّف المستخدم
+auto_instance_id	UInt32	Instance - K8s POD First	معرّف المثيل (يفضّل الـ Pod تلقائياً)
+auto_instance_type	UInt8	Type - K8s POD First	نوع المثيل (يفضّل الـ Pod)
+auto_service_id	UInt32	Instance - K8s Service First	معرّف الخدمة (يفضّل Service تلقائياً)
+auto_service_type	UInt8	Type - K8s Service First	نوع الخدمة (يفضّل Service)
+attribute_names	Array(String)	Extra Attributes	أسماء الخصائص الإضافية
+attribute_values	Array(String)	value of extra attributes	قيم الخصائص الإضافية (تقابل الأسماء بالترتيب)
+metrics_names	Array(String)	Extra Metrics	أسماء المقاييس الرقمية الإضافية
+metrics_values	Array(Float64)	Extra Metrics values	قيم المقاييس الإضافية (تقابل الأسماء بالترتيب)
+ملاحظة
+
+عمود الضغط (DoubleDelta, ZSTD, T64) حذفته من الجدول لأنه يخص طريقة التخزين الداخلية ولا يهمك عند الاستعلام.
+
+انا استخدم جدول application_log.log هو اساس 
