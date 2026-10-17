@@ -1,65 +1,57 @@
-## Traces page: show agent (eBPF) traces by default
+# Build log · Day 3 🔬
 
-### Why
-KernEye should not require customers to change their application code.
-The agent already captures traces and spans with eBPF. That is enough to see
-where a problem is (which service, which call, how slow, which errors),
-without the customer adding OpenTelemetry to their apps.
+**Date:** October 17, 2026
+**Project:** Kerneye (built on [Coroot](https://github.com/coroot/coroot))
 
-### Problem
-The Traces page was empty, even though the database had hundreds of
-thousands of traces.
+---
 
-KernEye has two trace sources, both stored in the same ClickHouse table (`otel_traces`):
-- **OpenTelemetry**: sent by the application itself (requires code changes).
-- **eBPF**: captured automatically by the agent. `ServiceName` starts with `/`.
+## What I did
 
-On the test server, every trace came from eBPF and none from OpenTelemetry:
+### 1. Tested Kerneye on a real app
 
-```
-$ docker exec -it kerneye-clickhouse-1 clickhouse-client -q \
-  "SELECT ServiceName, count() FROM otel_traces GROUP BY ServiceName"
-/docker/kerneye-server-1              638970
-/docker/kerneye-agent-1                44803
-/system.slice/k3s.service              45705
-/docker/example-voting-app-db-1          886
-/docker/example-voting-app-worker-1    80615
-/k8s/kube-system/metrics-server         5261
-/docker/example-voting-app-result-1     8200
-/docker/example-voting-app-vote-1         15
-/docker/example-voting-app-redis-1       100
-```
+I installed the [Docker Example Voting App](https://github.com/dockersamples/example-voting-app) (5 small services).
+Kerneye found them all and drew the service map on its own, with no setup.
 
-### Root cause
-`api/views/overview/overview.go:44` calls `RenderTraces(..., false)` for the
-Traces page. With `ebpfFallback = false`, the page looks only for OpenTelemetry
-traces, finds none, and returns `not_found`.
+### 2. Fixed the empty Traces page
 
-This was intentional upstream (Coroot), not a bug: `api/mcp.go:1397` calls the
-same function with `true`, so the AI/MCP side sees eBPF traces while the UI hides
-them, likely because eBPF traces show calls between services, not functions
-inside a request.
+The page was empty, but the database had hundreds of thousands of traces.
+The cause was one switch in the code: `false` for users, `true` for the AI side.
 
-### Side problem: platform noise
-Once eBPF traces are shown, KernEye's own containers dominate the page
-(`kerneye-server` alone has 638,970 spans), because the agent traces every
-container, including the platform itself.
+**My fix:** the page now shows traces from the Kerneye agent, with a filter for
+**application** (customer apps) or **monitoring** (Kerneye itself).
 
-### Changes
-- Traces page and heatmap always read agent (eBPF) traces.
-- New filter at the top, so the user picks what to see:
-  - **application**: customer apps (on by default)
-  - **monitoring (KernEye)**: the platform's own containers (off by default)
-  - Saved in the URL as `groups`.
-- OpenTelemetry UI hidden behind `OtelTracesUIEnabled` (Go) and
-  `otelEnabled` (Vue). No code deleted.
-- TRACING tab ignores OpenTelemetry services while the flag is off.
-- MCP, old links (`include_aux`) and OTLP ingestion are unchanged.
+Customers see traces right away, without changing their code.
 
-### Testing
-- `go build`, `go vet`, `go test ./...` (2 new tests), frontend lint and build: pass.
-- Manually tested on a server with the Docker example voting app.
+---
 
-### Rollback
-Set `OtelTracesUIEnabled = true` and `otelEnabled = true`, or revert this PR.
-No schema changes.
+## What I learned 📚
+
+| Idea | In one line |
+|---|---|
+| **eBPF** | Small programs inside the Linux kernel that watch everything, with no code changes |
+| **Span vs Trace** | A span is one step. A trace is the whole request. |
+| **Profiling vs Tracing** | Profiling: which function eats the CPU. Tracing: which call is slow. |
+| **Safe changes** | New branch, backend and frontend in separate commits, then a Pull Request |
+
+---
+
+## Mistakes and surprises 🐞
+
+- **A "memory leak" warning** was just cache filling up. It went away on its own.
+- **Redis showed 5 restarts**, but they were mine, from testing.
+- **Kerneye traced itself 638,970 times.** Now it's hidden by default.
+
+The lesson: **a warning is not always a problem.** Check the numbers first.
+
+---
+
+## Next step 🛡️
+
+Back to the main goal: **the security layer**.
+
+---
+
+## Question for you
+
+Have you ever chased a "bug" that turned out to be a setting someone chose on purpose?
+Share your story: [@kerneyehq](https://instagram.com/kerneyehq)
