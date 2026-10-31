@@ -60,10 +60,5 @@ The platform has full performance analysis, but no security analysis.
 
 ---
 
-## Question for you
 
-What's the most important thing to monitor for server security?
-Share your thoughts: [@kerneyehq](https://instagram.com/kerneyehq)
-
----
 

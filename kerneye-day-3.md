@@ -37,6 +37,7 @@ Customers see traces right away, without changing their code.
 
 ## Mistakes and surprises 🐞
 
+- **I thought the agent wasn't sending traces.** Wrong. One query to the database through Docker showed hundreds of thousands of traces were there. The problem was the page, not the agent.
 - **A "memory leak" warning** was just cache filling up. It went away on its own.
 - **Redis showed 5 restarts**, but they were mine, from testing.
 - **Kerneye traced itself 638,970 times.** Now it's hidden by default.
@@ -51,7 +52,3 @@ Back to the main goal: **the security layer**.
 
 ---
 
-## Question for you
-
-Have you ever chased a "bug" that turned out to be a setting someone chose on purpose?
-Share your story: [@kerneyehq](https://instagram.com/kerneyehq)
